@@ -1,78 +1,106 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import re
+import string
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 import pyLDAvis.gensim_models as gensimvis
 import pyLDAvis
-import gensim
-from gensim import corpora
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
+from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
+import gensim
+from gensim import corpora
+from gensim.models import LdaModel
 import nltk
-import string
-
-# Download stopwords jika belum tersedia
-nltk.download('punkt')
 nltk.download('stopwords')
-nltk.download('punkt_tab')
-stop_words = set(stopwords.words('indonesian'))
+nltk.download('punkt')
 
-def preprocess_text(text):
-    """Fungsi untuk membersihkan dan memproses teks."""
-    text = text.lower()  # Lowercase
-    text = text.translate(str.maketrans('', '', string.punctuation))  # Hapus tanda baca
-    tokens = word_tokenize(text)  # Tokenisasi
-    tokens = [word for word in tokens if word not in stop_words]  # Hapus stopwords
-    return tokens
+def load_data():
+    uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
+    if uploaded_file is not None:
+        return pd.read_csv(uploaded_file)
+    return None
+
+def remove_tweet_special(text):
+    text = text.replace('\\t', " ").replace('\\n', " ").replace('\\u', " ").replace('\\', "")
+    text = text.encode('ascii', 'replace').decode('ascii')
+    text = ' '.join(re.sub("([@#][A-Za-z0-9]+)|(\\w+:\/\/\\S+)", " ", text).split())
+    return text.replace("http://", " ").replace("https://", " ")
+
+def remove_number(text):
+    return re.sub(r"\d+", "", text)
+
+def remove_punctuation(text):
+    return text.translate(str.maketrans("", "", string.punctuation))
+
+def remove_whitespace_LT(text):
+    return text.strip()
+
+def remove_whitespace_multiple(text):
+    return re.sub('\s+', ' ', text)
+
+def remove_single_char(text):
+    return re.sub(r"\b[a-zA-Z]\b", "", text)
+
+def stopwords_removal(text, stopwords_list):
+    return " ".join([word for word in text.split() if word not in stopwords_list])
+
+def normalize_text(text, normalization_dict):
+    words = text.split()
+    return " ".join([normalization_dict.get(word, word) for word in words])
+
+def stemming_text(text, stemmer):
+    return stemmer.stem(text)
+
+def preprocess_text(df, text_column, stopwords_list, normalization_dict, stemmer):
+    df[text_column] = df[text_column].astype(str).apply(remove_tweet_special)
+    df[text_column] = df[text_column].apply(remove_number)
+    df[text_column] = df[text_column].apply(remove_punctuation)
+    df[text_column] = df[text_column].apply(remove_whitespace_LT)
+    df[text_column] = df[text_column].apply(remove_whitespace_multiple)
+    df[text_column] = df[text_column].apply(remove_single_char)
+    df[text_column] = df[text_column].str.lower()
+    df['cleaned_text'] = df[text_column].apply(lambda x: stopwords_removal(x, stopwords_list))
+    df['cleaned_text'] = df['cleaned_text'].apply(lambda x: normalize_text(x, normalization_dict))
+    df['stemmed_text'] = df['cleaned_text'].apply(lambda x: stemming_text(x, stemmer))
+    df['tokenized_text'] = df['stemmed_text'].apply(word_tokenize)
+    return df
 
 def main():
     st.title("Analisis Topic Modelling IKN dengan LDA")
-    
-    uploaded_file = st.file_uploader("Unggah dataset CSV", type=["csv"])
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-        st.write("Data yang diunggah:", df.head())
-        
-        # Pastikan ada kolom teks
-        text_column = st.selectbox("Pilih kolom teks untuk analisis", df.columns)
-        
+    df = load_data()
+    if df is not None:
+        text_column = st.selectbox("Pilih kolom teks", df.columns)
         if st.button("Proses Data"):
-            st.write("Memproses data...")
-            
-            # Preprocessing teks
-            df['processed_text'] = df[text_column].astype(str).apply(preprocess_text)
-            
-            # Membuat dictionary dan corpus BoW
-            dictionary = corpora.Dictionary(df['processed_text'])
-            corpus = [dictionary.doc2bow(text) for text in df['processed_text']]
-            
-            # Menentukan jumlah topik
-            num_topics = st.slider("Pilih jumlah topik", min_value=2, max_value=10, value=5)
-            
-            # Melatih model LDA
-            lda_model = gensim.models.LdaModel(corpus, num_topics=num_topics, id2word=dictionary, passes=10)
-            
-            # Tampilkan topik yang dihasilkan
-            st.write("Topik yang dihasilkan:")
-            for idx, topic in lda_model.show_topics(formatted=True, num_words=10):
-                st.write(f"Topik {idx+1}: {topic}")
-            
-            # WordCloud untuk setiap topik
-            st.write("### WordCloud untuk Setiap Topik")
-            cols = st.columns(num_topics)
-            for i in range(num_topics):
-                words = dict(lda_model.show_topic(i, 20))
-                wordcloud = WordCloud(width=400, height=300, background_color='white').generate_from_frequencies(words)
-                
-                with cols[i % len(cols)]:
-                    st.image(wordcloud.to_array(), caption=f"Topik {i+1}")
-            
-            # Visualisasi dengan pyLDAvis
-            st.write("### Visualisasi Interaktif dengan pyLDAvis")
-            vis = gensimvis.prepare(lda_model, corpus, dictionary)
-            html_string = pyLDAvis.prepared_data_to_html(vis)
-            st.components.v1.html(html_string, width=1000, height=800)
-
+            stopwords_list = set(stopwords.words('indonesian'))
+            normalization_dict = {}
+            stemmer = StemmerFactory().create_stemmer()
+            df = preprocess_text(df, text_column, stopwords_list, normalization_dict, stemmer)
+            st.write("Data setelah preprocessing:", df.head())
+            dictionary = corpora.Dictionary(df['tokenized_text'])
+            bow_corpus = [dictionary.doc2bow(text) for text in df['tokenized_text']]
+            lda_model = LdaModel(bow_corpus, num_topics=5, id2word=dictionary, passes=10, alpha=0.5, random_state=37)
+            topics = lda_model.print_topics(num_words=10)
+            st.write("Topik yang ditemukan:")
+            for topic in topics:
+                st.write(topic)
+            plt.figure(figsize=(15, 12))
+            for i, topic in enumerate(topics):
+                ax = plt.subplot(3, 3, i+1)
+                words = topic[1]
+                word_freq = {word.split('*')[1].strip().strip('"'): float(word.split('*')[0]) for word in words.split(' + ')}
+                wordcloud = WordCloud(width=600, height=400, background_color='white').generate_from_frequencies(word_freq)
+                ax.imshow(wordcloud, interpolation='bilinear')
+                ax.set_title(f'Topik {i+1}')
+                ax.axis('off')
+                for spine in ax.spines.values():
+                    spine.set_edgecolor('black')
+                    spine.set_linewidth(2)
+            plt.tight_layout()
+            st.pyplot(plt)
+            lda_vis_data = gensimvis.prepare(lda_model, bow_corpus, dictionary, sort_topics=False)
+            pyLDAvis_html = pyLDAvis.prepared_data_to_html(lda_vis_data)
+            st.components.v1.html(pyLDAvis_html, width=1300, height=800)
 if __name__ == "__main__":
     main()
