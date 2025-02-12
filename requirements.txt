@@ -4,5 +4,6 @@ pandas==2.0.3
 scikit-learn
 gensim
 pyLDAvis
+seaborn
 matplotlib
 wordcloud
