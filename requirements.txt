@@ -1,5 +1,5 @@
 streamlit==1.29.0
-numpy>=1.23.2,<1.26.0
+numpy>=1.26.0
 pandas==2.0.3
 scikit-learn
 gensim
