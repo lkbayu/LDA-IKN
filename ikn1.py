@@ -15,6 +15,7 @@ import string
 # Download stopwords jika belum tersedia
 nltk.download('punkt')
 nltk.download('stopwords')
+nltk.download('punkt_tab')
 stop_words = set(stopwords.words('indonesian'))
 
 def preprocess_text(text):
